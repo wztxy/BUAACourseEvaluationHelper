@@ -9,55 +9,104 @@ permissions:
   contents: write
 
 jobs:
-  build-h5:
+  build-android:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Build H5
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install dependencies
+        working-directory: uniapp
+        run: npm install
+
+      - name: Build Android
+        working-directory: uniapp
+        run: npx @dcloudio/uni-cli build -p app-android
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: uniapp/dist/build/app-android/*.apk
+
+  build-electron-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install and Build
         working-directory: uniapp
         run: |
           npm install
           npm run build:h5
+          npx electron-builder --win
+
       - uses: actions/upload-artifact@v4
         with:
-          name: h5-dist
-          path: uniapp/dist/build/h5
+          name: windows-exe
+          path: uniapp/dist/*.exe
 
-  build-electron:
-    needs: build-h5
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+  build-electron-linux:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - uses: actions/download-artifact@v4
-        with:
-          name: h5-dist
-          path: uniapp/dist/build/h5
-      - name: Build Electron
+
+      - name: Install and Build
         working-directory: uniapp
         run: |
           npm install
-          npx electron-builder --${{ matrix.os == 'ubuntu-latest' && 'linux' || matrix.os == 'windows-latest' && 'win' || 'mac' }}
+          npm run build:h5
+          npx electron-builder --linux
+
       - uses: actions/upload-artifact@v4
         with:
-          name: electron-${{ matrix.os }}
-          path: uniapp/dist/*.{exe,dmg,AppImage,zip}
+          name: linux-appimage
+          path: uniapp/dist/*.AppImage
+
+  build-electron-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install and Build
+        working-directory: uniapp
+        run: |
+          npm install
+          npm run build:h5
+          npx electron-builder --mac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: uniapp/dist/*.dmg
 
   release:
-    needs: build-electron
+    needs: [build-android, build-electron-windows, build-electron-linux, build-electron-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
-      - uses: softprops/action-gh-release@v1
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
         with:
-          files: electron-*/*
+          files: |
+            android-apk/*.apk
+            windows-exe/*.exe
+            linux-appimage/*.AppImage
+            macos-dmg/*.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
